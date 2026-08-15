@@ -2,8 +2,9 @@ from llama_index.llms.anthropic.utils import (
     is_anthropic_prompt_caching_supported_model,
     ANTHROPIC_PROMPT_CACHING_SUPPORTED_MODELS,
     update_tool_calls,
+    force_single_tool_call,
 )
-from llama_index.core.base.llms.types import ToolCallBlock, TextBlock
+from llama_index.core.base.llms.types import ToolCallBlock, TextBlock, ChatMessage, MessageRole, ChatResponse
 
 
 class TestAnthropicPromptCachingSupport:
@@ -139,3 +140,21 @@ def test_update_tool_calls() -> None:
     assert blocks[2].tool_call_id == "2"
     assert blocks[2].tool_name == "hello"
     assert blocks[2].tool_kwargs == {}
+
+
+def test_force_single_tool_call_keeps_first_tool_call() -> None:
+    response = ChatResponse(
+        message=ChatMessage(
+            role=MessageRole.ASSISTANT,
+            blocks=[
+                TextBlock(text="before"),
+                ToolCallBlock(tool_call_id="1", tool_name="one", tool_kwargs={}),
+                ToolCallBlock(tool_call_id="2", tool_name="two", tool_kwargs={}),
+            ],
+        )
+    )
+
+    force_single_tool_call(response)
+
+    assert len([b for b in response.message.blocks if isinstance(b, ToolCallBlock)]) == 1
+    assert response.message.blocks[-1].tool_call_id == "1"

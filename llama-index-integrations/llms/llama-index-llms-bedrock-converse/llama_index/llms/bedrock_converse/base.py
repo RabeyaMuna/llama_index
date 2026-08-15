@@ -409,10 +409,11 @@ class BedrockConverse(FunctionCallingLLM):
                     )
                 )
             if tool_result := content_block.get("toolResult", None):
-                for tool_result_content in tool_result["content"]:
+                text_content = ""
+                for tool_result_content in tool_result.get("content", []):
                     if text := tool_result_content.get("text", None):
                         text_content += text
-                tool_call_ids.append(tool_result_content.get("toolUseId", ""))
+                tool_call_ids.append(tool_result.get("toolUseId", ""))
                 status.append(tool_result.get("status", ""))
 
         return blocks, tool_call_ids, status

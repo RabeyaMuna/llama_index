@@ -19,6 +19,12 @@ from llama_index.vector_stores.couchbase import (
     CouchbaseVectorStore,
     CouchbaseSearchVectorStore,
 )
+from llama_index.vector_stores.couchbase.base import (
+    _transform_couchbase_filter_condition,
+    _transform_couchbase_filter_operator,
+    _to_couchbase_filter,
+    _convert_llamaindex_filters_to_sql,
+)
 from llama_index.core.storage.storage_context import StorageContext
 from llama_index.core import VectorStoreIndex
 from couchbase.cluster import Cluster
@@ -181,6 +187,35 @@ def delete_documents(
     """Delete all the documents in the collection."""
     query = f"DELETE FROM `{bucket_name}`.`{scope_name}`.`{collection_name}`"
     client.query(query).execute()
+
+
+def test_couchbase_filter_helpers() -> None:
+    assert _transform_couchbase_filter_condition("and") == "conjuncts"
+    assert _transform_couchbase_filter_condition("or") == "disjuncts"
+    assert _transform_couchbase_filter_operator("==", "metadata.genre", "Comedy") == {
+        "field": "metadata.genre",
+        "match": "Comedy",
+    }
+    assert _transform_couchbase_filter_operator(">=", "metadata.pages", 5) == {
+        "min": 5,
+        "inclusive_min": True,
+        "field": "metadata.pages",
+    }
+
+    filters = MetadataFilters(
+        condition="and",
+        filters=[
+            MetadataFilter(key="genre", value="Comedy"),
+            MetadataFilter(key="pages", value=5, operator=FilterOperator.GTE),
+        ],
+    )
+    transformed = _to_couchbase_filter(filters)
+    assert transformed["conjuncts"][0]["field"] == "metadata.genre"
+    assert transformed["conjuncts"][1]["min"] == 5
+
+    sql = _convert_llamaindex_filters_to_sql(filters, "metadata")
+    assert "d.metadata.genre = 'Comedy'" in sql
+    assert "d.metadata.pages >= 5" in sql
 
 
 @pytest.fixture(scope="session")

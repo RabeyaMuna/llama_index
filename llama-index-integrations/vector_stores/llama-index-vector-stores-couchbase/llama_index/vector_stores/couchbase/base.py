@@ -868,7 +868,7 @@ class CouchbaseQueryVectorStore(CouchbaseVectorStoreBase):
                 logger.warning(f"Failed to process filters: {e}")
 
         if query.output_fields:
-            fields = query.output_fields.join(",")
+            fields = ",".join(query.output_fields)
         else:
             fields = "d.*, meta().id as id"
 

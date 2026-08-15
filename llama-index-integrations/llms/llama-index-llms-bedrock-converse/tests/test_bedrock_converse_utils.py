@@ -24,6 +24,7 @@ from llama_index.llms.bedrock_converse.utils import (
     __get_img_format_from_image_mimetype,
     _content_block_to_bedrock_format,
 )
+from llama_index.llms.bedrock_converse.base import BedrockConverse
 
 
 def test_get_model_name_translates_us():
@@ -219,6 +220,48 @@ def test_tools_to_converse_tools_with_cache_enabled():
     assert len(result["tools"]) == 2
     assert result["tools"][0]["toolSpec"]["name"] == "search_tool"
     assert result["tools"][1]["cachePoint"]["type"] == "default"
+
+
+def test_bedrock_get_content_and_tool_calls_with_reasoning_and_tool_result():
+    llm = BedrockConverse(model="anthropic.claude-3-5-sonnet-20241022-v2:0", client=MagicMock())
+    response = {
+        "output": {
+            "message": {
+                "content": [
+                    {
+                        "reasoningContent": {
+                            "reasoningText": {"text": "thinking", "signature": "sig"}
+                        }
+                    },
+                    {
+                        "toolUse": {
+                            "toolUseId": "tool-1",
+                            "name": "search",
+                            "input": {"query": "hello"},
+                        }
+                    },
+                    {
+                        "toolResult": {
+                            "toolUseId": "tool-1",
+                            "status": "success",
+                            "content": [{"text": "done"}],
+                        }
+                    },
+                ]
+            }
+        }
+    }
+
+    blocks, tool_call_ids, status = llm._get_content_and_tool_calls(response)
+
+    assert any(block.content == "thinking" for block in blocks if hasattr(block, "content"))
+    assert any(
+        block.tool_name == "search" and block.tool_call_id == "tool-1"
+        for block in blocks
+        if hasattr(block, "tool_name")
+    )
+    assert tool_call_ids == ["tool-1"]
+    assert status == ["success"]
 
 
 # Tests for messages_to_converse_messages function
