@@ -211,8 +211,8 @@ def test_couchbase_filter_helpers() -> None:
         ],
     )
     transformed = _to_couchbase_filter(filters)
-    assert transformed["conjuncts"][0]["field"] == "metadata.genre"
-    assert transformed["conjuncts"][1]["min"] == 5
+    assert transformed["query"]["conjuncts"][0]["field"] == "metadata.genre"
+    assert transformed["query"]["conjuncts"][1]["min"] == 5
 
     sql = _convert_llamaindex_filters_to_sql(filters, "metadata")
     assert "d.metadata.genre = 'Comedy'" in sql
