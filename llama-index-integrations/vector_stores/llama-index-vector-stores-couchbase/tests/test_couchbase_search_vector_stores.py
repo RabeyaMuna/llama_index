@@ -14,6 +14,7 @@ from llama_index.core.vector_stores.types import (
     VectorStoreQuery,
     MetadataFilters,
     MetadataFilter,
+    FilterOperator,
 )
 from llama_index.vector_stores.couchbase import (
     CouchbaseVectorStore,
