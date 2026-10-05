@@ -33,11 +33,8 @@ try:
     import sqlalchemy
     import sqlalchemy.ext.asyncio  # noqa
 
-    conn__ = psycopg2.connect(**PARAMS)  # type: ignore
-    conn__.close()
-
     postgres_not_available = False
-except (ImportError, Exception):
+except ImportError:
     postgres_not_available = True
 
 
@@ -546,3 +543,7 @@ async def test_bm25_vs_tsvector_different_results(
     
     await pg_tsvector.close()
     await pg_bm25.close()
+
+
+def test_import_does_not_require_live_postgres() -> None:
+    assert postgres_not_available is False

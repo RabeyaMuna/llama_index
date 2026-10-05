@@ -36,3 +36,8 @@ llama-index-core/llama_index/core/_static
 **/*.egg-info/
 **/.coverage
 **/coverage.xml
+# Shell redirection artifacts
+=[0-9]*
+>[0-9]*
+*.tmp
+*.log
