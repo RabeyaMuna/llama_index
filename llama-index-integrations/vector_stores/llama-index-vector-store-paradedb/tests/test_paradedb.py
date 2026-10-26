@@ -1,5 +1,7 @@
 import asyncio
+from types import SimpleNamespace
 from typing import Any, Dict, Generator, List, Union
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from llama_index.core.schema import (
@@ -44,6 +46,179 @@ except (ImportError, Exception):
 def _get_sample_vector(num: float) -> List[float]:
     """Get sample embedding vector of the form [num, 1, 1, ..., 1]"""
     return [num] + [1.0] * (TEST_EMBED_DIM - 1)
+
+
+def test_get_bm25_data_model_and_init() -> None:
+    """Exercise the BM25 table model and initial store configuration."""
+    from sqlalchemy.orm import declarative_base
+
+    from llama_index.vector_stores.paradedb.base import get_bm25_data_model
+
+    base = declarative_base()
+    model = get_bm25_data_model(
+        base,
+        "demo",
+        "paradedb",
+        True,
+        "english",
+        False,
+        embed_dim=3,
+        use_jsonb=True,
+        use_halfvec=False,
+        indexed_metadata_keys={("category", "text"), ("score", "integer")},
+    )
+
+    assert model.__tablename__ == "data_demo"
+    assert model.__table__.schema == "paradedb"
+    assert "metadata_" in model.__table__.columns
+    assert "embedding" in model.__table__.columns
+
+    store = ParadeDBVectorStore(
+        connection_string="postgresql+psycopg2://user:pass@localhost:5432/test_db",
+        async_connection_string="postgresql+asyncpg://user:pass@localhost:5432/test_db",
+        table_name="demo",
+        schema_name="paradedb",
+        hybrid_search=True,
+        use_bm25=True,
+        embed_dim=3,
+        use_halfvec=False,
+    )
+
+    assert store.use_bm25 is True
+    assert store.table_name == "demo"
+    assert store._table_class.__tablename__ == "data_demo"
+
+
+def test_get_bm25_data_model_rejects_invalid_metadata_types() -> None:
+    """Invalid metadata types should fail fast during model creation."""
+    from sqlalchemy.orm import declarative_base
+
+    from llama_index.vector_stores.paradedb.base import get_bm25_data_model
+
+    with pytest.raises(ValueError, match="Invalid type"):
+        get_bm25_data_model(
+            declarative_base(),
+            "demo",
+            "paradedb",
+            True,
+            "english",
+            False,
+            embed_dim=3,
+            indexed_metadata_keys={("category", "unsupported_type")},
+        )
+
+
+def test_bm25_sparse_query_helpers() -> None:
+    """Validate BM25 sparse SQL generation and result extraction."""
+    store = SimpleNamespace(
+        use_bm25=True,
+        schema_name="paradedb",
+        _table_class=SimpleNamespace(__tablename__="data_demo"),
+    )
+    store._build_sparse_query = ParadeDBVectorStore._build_sparse_query.__get__(
+        store, SimpleNamespace
+    )
+    store._sparse_query_with_rank = ParadeDBVectorStore._sparse_query_with_rank.__get__(
+        store, SimpleNamespace
+    )
+
+    stmt = store._build_sparse_query("who is the fox?", limit=2)
+    compiled = str(stmt)
+    assert "paradedb.score" in compiled
+    assert "ORDER BY rank DESC" in compiled
+    assert "WHERE text @@@" in compiled
+
+    fake_row = SimpleNamespace(
+        id=1,
+        node_id="aaa",
+        text="fox and hound",
+        metadata_={"test_key": "test_value"},
+        rank=3.5,
+    )
+    fake_row._asdict = lambda: {
+        "id": 1,
+        "node_id": "aaa",
+        "text": "fox and hound",
+        "metadata_": {"test_key": "test_value"},
+        "rank": 3.5,
+    }
+
+    session = Mock()
+    session.__enter__ = Mock(return_value=session)
+    session.__exit__ = Mock(return_value=None)
+    session.begin.return_value.__enter__ = Mock(return_value=session)
+    session.begin.return_value.__exit__ = Mock(return_value=None)
+    session.execute.return_value = Mock(all=Mock(return_value=[fake_row]))
+    store._session = Mock(return_value=session)
+
+    rows = store._sparse_query_with_rank("fox", limit=2)
+    assert len(rows) == 1
+    assert rows[0].node_id == "aaa"
+    assert rows[0].similarity == 3.5
+    assert rows[0].metadata == {"test_key": "test_value"}
+
+
+@pytest.mark.asyncio
+async def test_async_bm25_sparse_query_helpers() -> None:
+    """Validate the async BM25 sparse query path."""
+    store = SimpleNamespace(
+        use_bm25=True,
+        schema_name="paradedb",
+        _table_class=SimpleNamespace(__tablename__="data_demo"),
+    )
+    store._build_sparse_query = ParadeDBVectorStore._build_sparse_query.__get__(
+        store, SimpleNamespace
+    )
+    store._async_sparse_query_with_rank = ParadeDBVectorStore._async_sparse_query_with_rank.__get__(
+        store, SimpleNamespace
+    )
+
+    fake_row = SimpleNamespace(
+        id=2,
+        node_id="bbb",
+        text="quick brown fox",
+        metadata_={"test_key": "async"},
+        rank=4.25,
+    )
+    fake_row._asdict = lambda: {
+        "id": 2,
+        "node_id": "bbb",
+        "text": "quick brown fox",
+        "metadata_": {"test_key": "async"},
+        "rank": 4.25,
+    }
+
+    class AsyncSessionStub:
+        def __init__(self) -> None:
+            self.execute = AsyncMock(return_value=Mock(all=Mock(return_value=[fake_row])))
+
+        async def __aenter__(self) -> "AsyncSessionStub":
+            return self
+
+        async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+            return None
+
+        def begin(self) -> "AsyncTransactionStub":
+            return AsyncTransactionStub(self)
+
+    class AsyncTransactionStub:
+        def __init__(self, session: AsyncSessionStub) -> None:
+            self.session = session
+
+        async def __aenter__(self) -> AsyncSessionStub:
+            return self.session
+
+        async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+            return None
+
+    async_session = AsyncSessionStub()
+    store._async_session = Mock(return_value=async_session)
+
+    rows = await store._async_sparse_query_with_rank("fox", limit=2)
+    assert len(rows) == 1
+    assert rows[0].node_id == "bbb"
+    assert rows[0].similarity == 4.25
+    assert rows[0].metadata == {"test_key": "async"}
 
 
 @pytest.fixture(scope="session")
